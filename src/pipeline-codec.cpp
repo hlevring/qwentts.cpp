@@ -265,7 +265,15 @@ std::vector<int32_t> pipeline_codec_encode(PipelineCodec * pc, const float * aud
     ggml_set_input(mask);
 
     // Forward chain.
-    struct ggml_tensor * h_seanet = qwen_seanet_encoder_forward(gctx, &pc->seanet, audio_in);  // [T_emb, 512]
+    struct ggml_tensor * sn_init_t    = NULL;
+    struct ggml_tensor * sn_resnet0_t = NULL;
+    struct ggml_tensor * sn_stage0_t  = NULL;
+    struct ggml_tensor * sn_stage1_t  = NULL;
+    struct ggml_tensor * sn_stage3_t  = NULL;
+    struct ggml_tensor * h_seanet =
+        qwen_seanet_encoder_forward(gctx, &pc->seanet, audio_in,
+                                    &sn_init_t, &sn_resnet0_t, &sn_stage0_t,
+                                    &sn_stage1_t, &sn_stage3_t);  // [T_emb, 512]
     struct ggml_tensor * h        = ggml_cont(gctx, ggml_transpose(gctx, h_seanet));           // [512, T_emb]
     struct ggml_tensor * h_et =
         qwen_encoder_transformer_forward(gctx, &pc->enc_transformer, h, positions, mask);      // [512, T_emb]
@@ -279,17 +287,50 @@ std::vector<int32_t> pipeline_codec_encode(PipelineCodec * pc, const float * aud
     h = ggml_cont(gctx, ggml_transpose(gctx, h));  // ne=(512, T)
 
     const char * dump = dump_dir;
-    struct ggml_tensor * h_seanet_dump = NULL;
+    struct ggml_tensor * h_seanet_dump   = NULL;
+    struct ggml_tensor * sn_init_dump    = NULL;
+    struct ggml_tensor * sn_resnet0_dump = NULL;
+    struct ggml_tensor * sn_stage0_dump  = NULL;
+    struct ggml_tensor * sn_stage1_dump  = NULL;
+    struct ggml_tensor * sn_stage3_dump  = NULL;
     if (dump) {
-        // SEANet output naturally lands as channel-first ggml ne=(T, hidden).
+        // SEANet output naturally lands as ggml ne=(T, hidden) (T innermost).
         // The encoder_transformer and downsample dumps further down are
-        // T-first numpy [T, hidden], so we transpose the SEANet view to
-        // match before pinning it as a graph output.
+        // T-first numpy [T, hidden], so we transpose+cont to bring hidden
+        // innermost before pinning as a graph output. The dump_2d then
+        // emits shape (ne[1], ne[0]) = (T, hidden) on the numpy side.
         h_seanet_dump = ggml_cont(gctx, ggml_transpose(gctx, h_seanet));
         ggml_set_output(h_seanet_dump);
         ggml_set_name(h_seanet_dump, "seanet_out_dump");
         ggml_set_output(h_et);
         ggml_set_name(h_et, "enc_transformer_out");
+
+        // SEANet bisection points. Same transpose convention as h_seanet.
+        if (sn_init_t) {
+            sn_init_dump = ggml_cont(gctx, ggml_transpose(gctx, sn_init_t));
+            ggml_set_output(sn_init_dump);
+            ggml_set_name(sn_init_dump, "seanet_init_dump");
+        }
+        if (sn_resnet0_t) {
+            sn_resnet0_dump = ggml_cont(gctx, ggml_transpose(gctx, sn_resnet0_t));
+            ggml_set_output(sn_resnet0_dump);
+            ggml_set_name(sn_resnet0_dump, "seanet_resnet0_dump");
+        }
+        if (sn_stage0_t) {
+            sn_stage0_dump = ggml_cont(gctx, ggml_transpose(gctx, sn_stage0_t));
+            ggml_set_output(sn_stage0_dump);
+            ggml_set_name(sn_stage0_dump, "seanet_stage0_dump");
+        }
+        if (sn_stage1_t) {
+            sn_stage1_dump = ggml_cont(gctx, ggml_transpose(gctx, sn_stage1_t));
+            ggml_set_output(sn_stage1_dump);
+            ggml_set_name(sn_stage1_dump, "seanet_stage1_dump");
+        }
+        if (sn_stage3_t) {
+            sn_stage3_dump = ggml_cont(gctx, ggml_transpose(gctx, sn_stage3_t));
+            ggml_set_output(sn_stage3_dump);
+            ggml_set_name(sn_stage3_dump, "seanet_stage3_dump");
+        }
     }
 
     ggml_set_name(h, "enc_hidden_out");
@@ -299,6 +340,21 @@ std::vector<int32_t> pipeline_codec_encode(PipelineCodec * pc, const float * aud
     ggml_build_forward_expand(graph, h);
     if (h_seanet_dump) {
         ggml_build_forward_expand(graph, h_seanet_dump);
+    }
+    if (sn_init_dump) {
+        ggml_build_forward_expand(graph, sn_init_dump);
+    }
+    if (sn_resnet0_dump) {
+        ggml_build_forward_expand(graph, sn_resnet0_dump);
+    }
+    if (sn_stage0_dump) {
+        ggml_build_forward_expand(graph, sn_stage0_dump);
+    }
+    if (sn_stage1_dump) {
+        ggml_build_forward_expand(graph, sn_stage1_dump);
+    }
+    if (sn_stage3_dump) {
+        ggml_build_forward_expand(graph, sn_stage3_dump);
     }
 
     if (!ggml_backend_sched_alloc_graph(pc->sched, graph)) {
@@ -329,6 +385,10 @@ std::vector<int32_t> pipeline_codec_encode(PipelineCodec * pc, const float * aud
     if (dump) {
         DebugDumper d;
         debug_init(&d, dump);
+        // Raw audio input dump : the SEANet sees this, and any divergence
+        // in the resampler (torchaudio reimpl C++ vs librosa Python) shows
+        // up here as a phase or amplitude drift.
+        debug_dump_1d(&d, "audio-input", audio, n_samples);
         // ggml ne layout matches numpy's last-dim-fastest, so a [d0, d1]
         // tensor in ggml dumps as a [d1, d0] numpy array. We emit the
         // shape ggml-side (ne[1], ne[0]) so numpy reshapes it correctly
@@ -342,6 +402,11 @@ std::vector<int32_t> pipeline_codec_encode(PipelineCodec * pc, const float * aud
         dump2("seanet-out",          h_seanet_dump);
         dump2("enc-transformer-out", h_et);
         dump2("codec-pre-fsq",       h);
+        if (sn_init_dump)    { dump2("seanet-init",    sn_init_dump);    }
+        if (sn_resnet0_dump) { dump2("seanet-resnet0", sn_resnet0_dump); }
+        if (sn_stage0_dump)  { dump2("seanet-stage0",  sn_stage0_dump);  }
+        if (sn_stage1_dump)  { dump2("seanet-stage1",  sn_stage1_dump);  }
+        if (sn_stage3_dump)  { dump2("seanet-stage3",  sn_stage3_dump);  }
     }
 
     // Read back the post-downsample hidden buffer for CPU-side RVQ encode.

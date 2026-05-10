@@ -8,17 +8,16 @@
 //
 // Structure:
 //   init       : MimiConv1d k=7, 1   -> 64,  causal stride=1
-//   for ratio in [4, 5, 6, 8] (Python loop reversed: ratios 8,6,5,4 in
-//   downsampling order applied to the audio):
+//   for ratio in reversed(upsampling_ratios) i.e. iter [4, 5, 6, 8] :
 //     resnet block: ELU -> Conv1d k=3 d=1 dim/2 -> ELU -> Conv1d k=1 dim
 //     ELU
 //     Conv1d k=2*ratio, stride=ratio, channels x2
 //   last       : MimiConv1d k=3, 1024 -> 512, causal stride=1
 //
-// Apply order on a 24 kHz waveform:
-//   audio -> init (1->64) -> stage 0 (8x, 64->128) -> stage 1 (6x, 128->256)
-//         -> stage 2 (5x, 256->512) -> stage 3 (4x, 512->1024) -> last (1024->512)
-// Total downsample = 8 * 6 * 5 * 4 = 960. The 12.5 Hz rate is reached after
+// Apply order on a 24 kHz waveform (matches Python MimiEncoder forward):
+//   audio -> init (1->64) -> stage 0 (4x, 64->128) -> stage 1 (5x, 128->256)
+//         -> stage 2 (6x, 256->512) -> stage 3 (8x, 512->1024) -> last (1024->512)
+// Total downsample = 4 * 5 * 6 * 8 = 960. The 12.5 Hz rate is reached after
 // the final downsample conv (factor 2 more in encoder-downsample.h).
 
 #include "causal-trans-conv.h"
@@ -187,17 +186,45 @@ static struct ggml_tensor * qwen_seanet_resnet_forward(struct ggml_context *    
 
 // Full SEANet forward.
 //   x: [T_audio, 1] f32 T-first (mono waveform)
-// returns [T_audio / 960, 512] f32 T-first.
+// Optional out-params capture intermediate stage outputs in T-first ggml
+// layout ne=(C, T_out) for debug bisection. Each is NULL by default and
+// the caller decides whether to mark them as graph outputs.
+//   init_out    : post init MimiConv1d k=7, [T_audio, 64]
+//   resnet0_out : post stage 0 resnet block, before ELU+downsample, [T_audio, 64]
+//   stage0_out  : post stage 0 (resnet + ELU + downsample 4x), [T_audio/4, 128]
+//   stage1_out  : post stage 1 (resnet + ELU + downsample 5x), [T_audio/20, 256]
+//   stage3_out  : post stage 3 (resnet + ELU + downsample 8x), [T_audio/960, 1024]
+// Returns [T_audio / 960, 512] f32 T-first.
 static struct ggml_tensor * qwen_seanet_encoder_forward(struct ggml_context *     ctx,
                                                         const QwenSEANetEncoder * s,
-                                                        struct ggml_tensor *      x) {
+                                                        struct ggml_tensor *      x,
+                                                        struct ggml_tensor **     init_out    = NULL,
+                                                        struct ggml_tensor **     resnet0_out = NULL,
+                                                        struct ggml_tensor **     stage0_out  = NULL,
+                                                        struct ggml_tensor **     stage1_out  = NULL,
+                                                        struct ggml_tensor **     stage3_out  = NULL) {
     x = qwen_causal_conv1d(ctx, s->init_w, s->init_b, x, s->kernel_size, 1, 1);
+    if (init_out) {
+        *init_out = x;
+    }
 
     for (int i = 0; i < QWEN_SEANET_NUM_STAGES; i++) {
         const QwenSEANetStage & stg = s->stages[i];
         x                           = qwen_seanet_resnet_forward(ctx, &stg.resnet, x, s->residual_kernel_size);
+        if (i == 0 && resnet0_out) {
+            *resnet0_out = x;
+        }
         x                           = ggml_elu(ctx, x);
         x                           = qwen_causal_conv1d(ctx, stg.down_w, stg.down_b, x, 2 * stg.ratio, 1, stg.ratio);
+        if (i == 0 && stage0_out) {
+            *stage0_out = x;
+        }
+        if (i == 1 && stage1_out) {
+            *stage1_out = x;
+        }
+        if (i == 3 && stage3_out) {
+            *stage3_out = x;
+        }
     }
 
     x = ggml_elu(ctx, x);

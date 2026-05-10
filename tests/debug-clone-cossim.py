@@ -53,6 +53,11 @@ STAGES_CLONE = cc.STAGES_STANDARD + [
     ("MelBasis",        "mel-basis.bin"),
     ("MelMag",          "mel-mag.bin"),
     ("MelSpk",          "mel-spk.bin"),
+    ("SeanetInit",      "seanet-init.bin"),
+    ("SeanetResnet0",   "seanet-resnet0.bin"),
+    ("SeanetStage0",    "seanet-stage0.bin"),
+    ("SeanetStage1",    "seanet-stage1.bin"),
+    ("SeanetStage3",    "seanet-stage3.bin"),
     ("SeanetOut",       "seanet-out.bin"),
     ("EncTransformer",  "enc-transformer-out.bin"),
     ("CodecPreFSQ",     "codec-pre-fsq.bin"),
@@ -105,6 +110,61 @@ def install_clone_hooks(model, dump_dir):
         cc.save_dump(os.path.join(dump_dir, "codec-pre-fsq.bin"), out[0].transpose(0, 1).contiguous())
         seen_down["done"] = True
     enc.downsample.register_forward_hook(hook_down)
+
+    # SEANet bisection. enc.encoder is a MimiEncoder whose .layers ModuleList
+    # holds, in order : [0] init MimiConv1d, [1] resnet, [2] ELU, [3] down 4x,
+    # [4] resnet, [5] ELU, [6] down 5x, [7] resnet, [8] ELU, [9] down 6x,
+    # [10] resnet, [11] ELU, [12] down 8x, [13] ELU, [14] last MimiConv1d.
+    # We hook the init conv and the three downsample convs the C++ side
+    # exposes as out-params in qwen_seanet_encoder_forward.
+    sn_layers = enc.encoder.layers
+
+    seen_sn_init = {"done": False}
+    def hook_sn_init(module, args, output):
+        if seen_sn_init["done"]:
+            return
+        out = output[0] if isinstance(output, tuple) else output
+        # MimiConv1d output : [B=1, OC, T] channel-first -> [T, OC] T-first.
+        cc.save_dump(os.path.join(dump_dir, "seanet-init.bin"), out[0].transpose(0, 1).contiguous())
+        seen_sn_init["done"] = True
+    sn_layers[0].register_forward_hook(hook_sn_init)
+
+    seen_sn_r0 = {"done": False}
+    def hook_sn_resnet0(module, args, output):
+        if seen_sn_r0["done"]:
+            return
+        out = output[0] if isinstance(output, tuple) else output
+        # MimiResnetBlock output : [B=1, OC, T] channel-first -> [T, OC] T-first.
+        cc.save_dump(os.path.join(dump_dir, "seanet-resnet0.bin"), out[0].transpose(0, 1).contiguous())
+        seen_sn_r0["done"] = True
+    sn_layers[1].register_forward_hook(hook_sn_resnet0)
+
+    seen_sn_s0 = {"done": False}
+    def hook_sn_stage0(module, args, output):
+        if seen_sn_s0["done"]:
+            return
+        out = output[0] if isinstance(output, tuple) else output
+        cc.save_dump(os.path.join(dump_dir, "seanet-stage0.bin"), out[0].transpose(0, 1).contiguous())
+        seen_sn_s0["done"] = True
+    sn_layers[3].register_forward_hook(hook_sn_stage0)
+
+    seen_sn_s1 = {"done": False}
+    def hook_sn_stage1(module, args, output):
+        if seen_sn_s1["done"]:
+            return
+        out = output[0] if isinstance(output, tuple) else output
+        cc.save_dump(os.path.join(dump_dir, "seanet-stage1.bin"), out[0].transpose(0, 1).contiguous())
+        seen_sn_s1["done"] = True
+    sn_layers[6].register_forward_hook(hook_sn_stage1)
+
+    seen_sn_s3 = {"done": False}
+    def hook_sn_stage3(module, args, output):
+        if seen_sn_s3["done"]:
+            return
+        out = output[0] if isinstance(output, tuple) else output
+        cc.save_dump(os.path.join(dump_dir, "seanet-stage3.bin"), out[0].transpose(0, 1).contiguous())
+        seen_sn_s3["done"] = True
+    sn_layers[12].register_forward_hook(hook_sn_stage3)
 
     seen_mel = {"done": False}
     def hook_spk_pre(module, args, kwargs):
@@ -274,7 +334,16 @@ def main():
     ref_wav = ref_wav.astype(np.float32)
     target_sr = model.speaker_encoder_sample_rate
     if ref_sr != target_sr:
-        ref_wav = librosa.resample(y=ref_wav, orig_sr=int(ref_sr), target_sr=int(target_sr))
+        # Match C++ side audio_resample.h which is a torchaudio.functional.resample
+        # reimplementation. Using librosa.resample here would introduce a phase
+        # drift between the two waveforms that propagates through the SEANet
+        # stack and shows up as a measurable cossim drop on the codec encoder
+        # bisection stages.
+        import torchaudio
+        ref_wav = torchaudio.functional.resample(
+            torch.from_numpy(ref_wav.astype(np.float32)),
+            int(ref_sr), int(target_sr),
+        ).numpy()
         ref_sr = target_sr
     print(f"[Python] RefWav: {ref_wav.shape[0]} samples {ref_sr} Hz {ref_wav.shape[0]/ref_sr:.2f}s")
 
@@ -299,6 +368,7 @@ def main():
     HOP         = 1920
     aligned_T   = (ref_wav.shape[0] // HOP) * HOP
     ref_wav_aln = ref_wav[:aligned_T]
+    cc.save_dump(os.path.join(DUMP_PT, "audio-input.bin"), torch.from_numpy(ref_wav_aln.astype(np.float32)))
     enc         = model.speech_tokenizer.encode([ref_wav_aln], sr=int(ref_sr))
     ref_code_pt = enc.audio_codes[0]
     ref_code_kt = ref_code_pt.transpose(0, 1).contiguous()
