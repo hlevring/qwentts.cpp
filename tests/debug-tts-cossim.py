@@ -9,8 +9,9 @@ Default mode is greedy (do_sample=False on both sides). Cote Python the
 utterance and the instruction are tokenized separately and passed to
 model.generate as input_ids and instruct_ids, mirroring exactly what
 qwen_tts.inference.qwen3_tts_model.generate_voice_design does. Cote C++
-both strings are passed through --text and --instruct, the prompt builder
-wraps and tokenizes them in the same order.
+the utterance is piped on stdin and the instruction is passed via
+--instruct, the prompt builder wraps and tokenizes them in the same
+order.
 
 Dumps land in cpp/tts/ (C++) and python/tts/ (Python).
 """
@@ -140,7 +141,6 @@ def main():
         "--model",    model_lm,
         "--codec",    model_cdc,
         "--seed",     str(args.seed),
-        "--text",     text,
         "--instruct", args.instruct,
         "--lang",     args.lang,
         "--max-new",  str(args.max_new_tokens),
@@ -149,7 +149,7 @@ def main():
         "--greedy",
     ]
     print(f"[GGML] Cmd: {' '.join(cmd)}")
-    r = subprocess.run(cmd)
+    r = subprocess.run(cmd, input=text, text=True)
     if r.returncode != 0:
         sys.exit(r.returncode)
 

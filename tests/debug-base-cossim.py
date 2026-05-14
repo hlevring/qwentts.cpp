@@ -125,7 +125,6 @@ def main():
         "--model",   model_lm,
         "--codec",   model_cdc,
         "--seed",    str(args.seed),
-        "--text",    text,
         "--lang",    args.lang,
         "--max-new", str(args.max_new_tokens),
         "--dump",    DUMP_CPP,
@@ -133,7 +132,7 @@ def main():
         "--greedy",
     ]
     print(f"[GGML] Cmd: {' '.join(cmd)}")
-    r = subprocess.run(cmd)
+    r = subprocess.run(cmd, input=text, text=True)
     if r.returncode != 0:
         sys.exit(r.returncode)
 

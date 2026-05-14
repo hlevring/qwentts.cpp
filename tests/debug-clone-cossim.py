@@ -455,8 +455,7 @@ def main():
         "--model",     model_lm,
         "--codec",     model_cdc,
         "--seed",      str(args.seed),
-        "--text",      text,
-        "--ref-wav", args.ref_wav,
+        "--ref-wav",   args.ref_wav,
         "--ref-text",  args.ref_text,
         "--lang",      args.lang,
         "--max-new",   str(args.max_new_tokens),
@@ -464,8 +463,8 @@ def main():
         "-o",          args.out_cpp,
         "--greedy",
     ]
-    print(f"[GGML] Cmd: {' '.join(cmd[:6])} --text [...] --ref-wav {args.ref_wav} --ref-text [...] --lang {args.lang} --max-new {args.max_new_tokens} --dump {DUMP_CPP} -o {args.out_cpp} --greedy")
-    r = subprocess.run(cmd)
+    print(f"[GGML] Cmd: {' '.join(cmd)}")
+    r = subprocess.run(cmd, input=text, text=True)
     if r.returncode != 0:
         sys.exit(r.returncode)
 
