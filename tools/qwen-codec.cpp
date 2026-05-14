@@ -13,6 +13,7 @@
 #include "audio-io.h"
 #include "backend.h"
 #include "pipeline-codec.h"
+#include "utf8.h"
 #include "version.h"
 
 #include <cstdint>
@@ -82,7 +83,7 @@ static std::vector<uint8_t> pack_codes(const std::vector<int32_t> & codes) {
 // Read a .rvq file and unpack it into K*T codes. T is inferred from the
 // file size: T = (filesize * 8) / (K * QWEN_TOKENIZER_CODE_BITS).
 static bool read_rvq(const char * path, int K, std::vector<int32_t> & codes, int * n_frames) {
-    FILE * f = fopen(path, "rb");
+    FILE * f = utf8_fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "[Codec] FATAL: cannot open %s\n", path);
         return false;
@@ -117,7 +118,7 @@ static bool read_rvq(const char * path, int K, std::vector<int32_t> & codes, int
 // Pack and write a .rvq file.
 static bool write_rvq(const char * path, const std::vector<int32_t> & codes) {
     std::vector<uint8_t> packed = pack_codes(codes);
-    FILE *               f      = fopen(path, "wb");
+    FILE *               f      = utf8_fopen(path, "wb");
     if (!f) {
         fprintf(stderr, "[Codec] FATAL: cannot open %s for write\n", path);
         return false;
@@ -154,6 +155,7 @@ static int infer_mode(const char * path) {
 }
 
 int main(int argc, char ** argv) {
+    utf8_init(&argc, &argv);
     if (argc <= 1) {
         print_usage(argv[0]);
         return 0;

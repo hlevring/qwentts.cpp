@@ -4,6 +4,8 @@
 // dump.
 // File format : [int32 ndims] [int32 dim0] [int32 dim1] ... [float data...]
 
+#include "utf8.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -34,7 +36,7 @@ static void debug_dump(const DebugDumper * d, const char * name, const float * d
     for (int i = 0; i < ndims; i++) {
         numel *= shape[i];
     }
-    FILE * f = fopen(path, "wb");
+    FILE * f = utf8_fopen(path, "wb");
     if (!f) {
         fprintf(stderr, "[Debug] cannot write %s\n", path);
         return;

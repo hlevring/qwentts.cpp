@@ -18,6 +18,9 @@
 // audio-resample.h: sample rate conversion
 #include "audio-resample.h"
 
+// utf8.h: utf8_fopen, the path-UTF-8-aware fopen used below.
+#include "utf8.h"
+
 // case-insensitive extension check
 static bool audio_io_ends_with(const char * str, const char * suffix) {
     int slen = (int) strlen(str);
@@ -44,7 +47,7 @@ static bool audio_io_ends_with(const char * str, const char * suffix) {
 // Load entire file into memory. Caller frees the returned pointer.
 static uint8_t * audio_io_load_file(const char * path, size_t * size_out) {
     *size_out = 0;
-    FILE * fp = fopen(path, "rb");
+    FILE * fp = utf8_fopen(path, "rb");
     if (!fp) {
         fprintf(stderr, "[Audio] Cannot open %s\n", path);
         return NULL;
@@ -333,7 +336,7 @@ static bool audio_write_wav(const char * path, const float * audio, int T_audio,
     }
 
     const bool to_stdout = (path[0] == '-' && path[1] == '\0');
-    FILE *     fp        = to_stdout ? stdout : fopen(path, "wb");
+    FILE *     fp        = to_stdout ? stdout : utf8_fopen(path, "wb");
     if (!fp) {
         fprintf(stderr, "[WAV] Cannot open %s for writing\n", path);
         return false;

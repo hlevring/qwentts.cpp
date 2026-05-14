@@ -19,9 +19,12 @@ add_custom_target(version ALL
 # and older x86_64 toolchains need the explicit dependency.
 find_package(Threads REQUIRED)
 
-# Suppress MSVC fopen/sprintf deprecation warnings
+# Suppress MSVC fopen/sprintf deprecation warnings, force UTF-8 source and
+# execution charsets so non-ASCII string literals (CJK in text-chunker.h,
+# prompt-builder.cpp) survive the compile without a BOM.
 if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    add_compile_options(/utf-8)
 endif()
 
 # Put executables and backend .so in the same directory (build root).

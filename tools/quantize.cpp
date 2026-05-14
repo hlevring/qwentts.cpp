@@ -25,6 +25,7 @@
 
 #include "ggml.h"
 #include "gguf.h"
+#include "utf8.h"
 #include "version.h"
 
 // Quant variant: base type + optional bump rules for important tensors
@@ -227,6 +228,7 @@ static bool to_f32(const void * src, float * dst, int64_t n, enum ggml_type type
 }
 
 int main(int argc, char ** argv) {
+    utf8_init(&argc, &argv);
     if (argc != 4) {
         fprintf(stderr, "qwentts.cpp %s\n\n", QWEN_VERSION);
         fprintf(stderr, "Usage: %s <input.gguf> <output.gguf> <type>\n", argv[0]);
@@ -251,12 +253,14 @@ int main(int argc, char ** argv) {
 
     // Mmap input file
 #ifdef _WIN32
-    HANDLE fh = CreateFileA(inp_path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    std::wstring winp_path = utf8_to_wide(inp_path);
+    HANDLE       fh =
+        CreateFileW(winp_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (fh == INVALID_HANDLE_VALUE) {
         fprintf(stderr, "[Quantize] Failed to open %s\n", inp_path);
         return 1;
     }
-    HANDLE mh = CreateFileMappingA(fh, NULL, PAGE_READONLY, 0, 0, NULL);
+    HANDLE mh = CreateFileMappingW(fh, NULL, PAGE_READONLY, 0, 0, NULL);
     if (!mh) {
         fprintf(stderr, "[Quantize] CreateFileMapping failed %s\n", inp_path);
         CloseHandle(fh);
@@ -396,7 +400,7 @@ int main(int argc, char ** argv) {
     }
 
     // Stream tensor data one at a time (low memory)
-    FILE * fout = fopen(out_path, "ab");
+    FILE * fout = utf8_fopen(out_path, "ab");
     if (!fout) {
         fprintf(stderr, "[Quantize] Failed to open %s for append\n", out_path);
         return 1;

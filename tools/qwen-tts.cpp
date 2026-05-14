@@ -14,6 +14,7 @@
 #include "backend.h"
 #include "bpe.h"
 #include "pipeline-tts.h"
+#include "utf8.h"
 #include "version.h"
 
 #include <cstdio>
@@ -104,7 +105,7 @@ static std::string read_stdin_text() {
 
 // Read a small text file into a string. Trims trailing newlines.
 static bool read_text_file(const char * path, std::string & out) {
-    FILE * f = fopen(path, "rb");
+    FILE * f = utf8_fopen(path, "rb");
     if (!f) {
         fprintf(stderr, "[CLI] FATAL: cannot open '%s'\n", path);
         return false;
@@ -400,6 +401,7 @@ static int run(const Args & a) {
 }
 
 int main(int argc, char ** argv) {
+    utf8_init(&argc, &argv);
     Args a;
     if (!parse_args(argc, argv, a)) {
         print_usage(argv[0]);

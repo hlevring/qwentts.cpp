@@ -23,8 +23,7 @@
 #include <vector>
 
 #ifdef _WIN32
-#    define NOMINMAX
-#    include <windows.h>
+#    include "utf8.h"
 #else
 #    include <fcntl.h>
 #    include <sys/mman.h>
@@ -79,7 +78,9 @@ static bool gf_load(GGUFModel * gf, const char * path) {
 
     // mmap the file
 #ifdef _WIN32
-    gf->fh = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    std::wstring wpath = utf8_to_wide(path);
+    gf->fh =
+        CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (gf->fh == INVALID_HANDLE_VALUE) {
         fprintf(stderr, "[GGUF] Cannot open %s\n", path);
         return false;
@@ -87,7 +88,7 @@ static bool gf_load(GGUFModel * gf, const char * path) {
     LARGE_INTEGER li;
     GetFileSizeEx(gf->fh, &li);
     gf->file_size = (size_t) li.QuadPart;
-    gf->mh        = CreateFileMappingA(gf->fh, NULL, PAGE_READONLY, 0, 0, NULL);
+    gf->mh        = CreateFileMappingW(gf->fh, NULL, PAGE_READONLY, 0, 0, NULL);
     if (!gf->mh) {
         CloseHandle(gf->fh);
         fprintf(stderr, "[GGUF] CreateFileMapping failed %s\n", path);
