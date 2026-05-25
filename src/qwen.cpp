@@ -20,6 +20,7 @@
 #include "bpe.h"
 #include "pipeline-tts.h"
 #include "qt-error.h"
+#include "speaker-encoder-extract.h"
 #include "version.h"
 
 #include <atomic>
@@ -216,6 +217,8 @@ void qt_tts_default_params(struct qt_tts_params * p) {
     p->cancel_user_data       = nullptr;
     p->on_chunk               = nullptr;
     p->on_chunk_user_data     = nullptr;
+    p->speaker_emb            = nullptr;
+    p->speaker_emb_dim        = 0;
     p->codec_chunk_sec        = 24.0f;
     p->codec_left_context_sec = 2.0f;
 }
@@ -395,6 +398,49 @@ int qt_duration_sec_to_tokens(const struct qt_context * q, float duration_sec) {
         return 1;
     }
     return pipeline_tts_duration_sec_to_tokens(&q->pt, duration_sec);
+}
+
+void qt_speaker_emb_free(struct qt_speaker_emb * emb) {
+    if (emb) {
+        free(emb->data);
+        emb->data = NULL;
+        emb->dim  = 0;
+    }
+}
+
+enum qt_status qt_extract_speaker(struct qt_context * q, const float * audio_24k, int n_samples,
+                                  struct qt_speaker_emb * out) {
+    if (!q || !out) {
+        qt_set_error("qt_extract_speaker: q or out is NULL");
+        return QT_STATUS_INVALID_PARAMS;
+    }
+    if (!audio_24k || n_samples <= 0) {
+        qt_set_error("qt_extract_speaker: audio_24k is NULL or n_samples <= 0");
+        return QT_STATUS_INVALID_PARAMS;
+    }
+    if (!q->pt.has_speaker_encoder) {
+        qt_set_error("qt_extract_speaker: model has no speaker encoder (Base models only)");
+        return QT_STATUS_MODE_INVALID;
+    }
+
+    try {
+        std::vector<float> emb;
+        if (!speaker_encoder_extract(&q->pt.speaker_encoder, q->pt.sched, audio_24k, n_samples, emb, NULL)) {
+            qt_set_error("qt_extract_speaker: speaker_encoder_extract failed");
+            return QT_STATUS_GENERATE_FAILED;
+        }
+        out->dim  = (int) emb.size();
+        out->data = (float *) malloc(emb.size() * sizeof(float));
+        if (!out->data) {
+            qt_set_error("qt_extract_speaker: malloc failed");
+            return QT_STATUS_OOM;
+        }
+        memcpy(out->data, emb.data(), emb.size() * sizeof(float));
+        return QT_STATUS_OK;
+    } catch (const std::exception & e) {
+        qt_set_error("qt_extract_speaker: %s", e.what());
+        return QT_STATUS_GENERATE_FAILED;
+    }
 }
 
 }  // extern "C"

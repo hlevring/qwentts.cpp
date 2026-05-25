@@ -2,7 +2,7 @@ build/
 *.wav
 
 tests/*/
-
+temp/*/
 checkpoints/
 models/*.gguf
 __pycache__/

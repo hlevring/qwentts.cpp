@@ -327,14 +327,25 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
     const std::string   speaker  = params->speaker ? params->speaker : "";
     const std::string   ref_text = params->ref_text ? params->ref_text : "";
 
-    // Voice clone mode A: if ref_audio_24k is given, run the speaker
-    // encoder on the pre-decoded mono buffer and feed the resulting
-    // embedding straight into the prompt builder. Mutually exclusive
-    // with --speaker.
-    const bool         has_ref_audio = (params->ref_audio_24k != NULL) && (params->ref_n_samples > 0);
+    // Voice clone: speaker embedding can come from three sources:
+    //   1. Pre-extracted via qt_extract_speaker (params->speaker_emb)
+    //   2. Extracted on the fly from ref_audio_24k
+    //   3. Neither (pure text synthesis or custom_voice/voice_design)
+    const bool         has_ref_audio  = (params->ref_audio_24k != NULL) && (params->ref_n_samples > 0);
+    const bool         has_precomp    = (params->speaker_emb != NULL) && (params->speaker_emb_dim > 0);
     std::vector<float> ref_spk_emb;
     const float *      ref_spk_emb_ptr = NULL;
-    if (has_ref_audio) {
+    if (has_precomp) {
+        if (params->speaker_emb_dim != pt->talker.hidden_size) {
+            qt_set_error("pipeline_tts_synthesize: speaker_emb_dim %d mismatches talker hidden %d",
+                         params->speaker_emb_dim, pt->talker.hidden_size);
+            qt_log(QT_LOG_ERROR, "[Pipeline] speaker_emb_dim %d mismatches talker hidden %d",
+                   params->speaker_emb_dim, pt->talker.hidden_size);
+            return QT_STATUS_INVALID_PARAMS;
+        }
+        ref_spk_emb_ptr = params->speaker_emb;
+        qt_log(QT_LOG_INFO, "[Pipeline] Using pre-extracted speaker embedding (dim=%d)", params->speaker_emb_dim);
+    } else if (has_ref_audio) {
         if (!pt->has_speaker_encoder) {
             qt_set_error(
                 "pipeline_tts_synthesize: --ref-wav requires a model with a loaded speaker encoder (Base only)");

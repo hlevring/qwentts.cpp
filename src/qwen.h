@@ -253,6 +253,13 @@ struct qt_tts_params {
     qt_audio_chunk_cb on_chunk;
     void *            on_chunk_user_data;
 
+    // Pre-extracted speaker embedding. When non NULL, bypasses the
+    // speaker encoder and uses this embedding directly. Obtain via
+    // qt_extract_speaker. Mutually exclusive with ref_audio_24k and
+    // speaker. speaker_emb_dim must match the model hidden size.
+    const float * speaker_emb;
+    int           speaker_emb_dim;
+
     // Codec decode framing. Applied to both the streaming path (chunk
     // by chunk emission) and the buffered path (one shot decode at the
     // end) : the chunked decode rolls a left context window across the
@@ -290,6 +297,29 @@ QT_API enum qt_status qt_synthesize(struct qt_context * q, const struct qt_tts_p
 // frame rate (24000 / TOKENIZER_HOP_LENGTH = 12.5 Hz).
 // Clamps to a minimum of one frame.
 QT_API int qt_duration_sec_to_tokens(const struct qt_context * q, float duration_sec);
+
+// Speaker embedding extracted from reference audio. The data pointer is
+// malloc allocated by qt_extract_speaker, owned by the struct, released
+// by qt_speaker_emb_free. Zero initialise before first use.
+struct qt_speaker_emb {
+    float * data;   // f32 embedding vector, malloc allocated
+    int     dim;    // dimensionality (1024 for 0.6B, 2048 for 1.7B)
+};
+
+// Release the embedding buffer and reset the struct to empty. Safe on a
+// zero initialised struct.
+QT_API void qt_speaker_emb_free(struct qt_speaker_emb * emb);
+
+// Extract the speaker embedding from a mono 24 kHz audio buffer using
+// the loaded speaker encoder. Requires a Base model with a speaker
+// encoder present. Returns QT_STATUS_OK on success, fills out with the
+// embedding. The embedding can be reused across multiple qt_synthesize
+// calls by passing it in qt_tts_params.speaker_emb.
+QT_API enum qt_status qt_extract_speaker(
+    struct qt_context *     q,
+    const float *           audio_24k,
+    int                     n_samples,
+    struct qt_speaker_emb * out);
 
 #ifdef __cplusplus
 }
