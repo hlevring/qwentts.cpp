@@ -137,6 +137,14 @@ QT_API struct qt_context * qt_init(const struct qt_init_params * params);
 // Safe on NULL.
 QT_API void qt_free(struct qt_context * q);
 
+// Force the GGML compute device for subsequent qt_init calls, by device name
+// (e.g. "CPU", "Vulkan0", "CUDA0"; see ggml_backend_dev_name). Overrides the
+// GGML_BACKEND env var; NULL or "" clears it (falls back to env / auto-best).
+// Process-wide, and effective only before the first qt_init (the backend is
+// cached after that). Provided because a DLL loaded at runtime cannot reliably
+// receive backend selection via environment changes.
+QT_API void qt_set_backend(const char * name);
+
 // Precomputed Base-model voice reference latents. Plain POD: both
 // pointers are malloc allocated by qt_extract_voice_ref, owned by the
 // struct, released by qt_voice_ref_free. Do not free either pointer

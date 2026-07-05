@@ -24,6 +24,13 @@ struct BackendPair {
 static BackendPair g_backend_cache = {};
 static int         g_backend_refs  = 0;
 
+// Explicit backend override (device name, e.g. "CPU" / "Vulkan0"), set via
+// qt_set_backend. Preferred over the GGML_BACKEND env var when non-empty. This
+// exists because a DLL loaded at runtime cannot reliably reach its own getenv
+// via a host process's env writes (static CRT snapshots env at startup), so
+// bindings need an explicit selector. Empty => fall back to GGML_BACKEND / best.
+static std::string g_backend_override;
+
 // Physical core count heuristic (logical / 2 for HT/SMT).
 // Used for GGML CPU thread count: GEMM shares SIMD units across hyperthreads,
 // so one thread per physical core is optimal.
@@ -107,9 +114,11 @@ static BackendPair backend_init(const char * label) {
     ggml_backend_load_all();
     BackendPair bp = {};
 
-    // GGML_BACKEND env var: force a specific device instead of auto-best.
-    // Device names: CUDA0, Vulkan0, CPU, BLAS (see ggml_backend_dev_name).
-    const char * force_backend = std::getenv("GGML_BACKEND");
+    // Force a specific device instead of auto-best. Device names: CUDA0,
+    // Vulkan0, CPU, BLAS (see ggml_backend_dev_name). Explicit override (set via
+    // qt_set_backend) wins; otherwise the GGML_BACKEND env var.
+    const char * force_backend = !g_backend_override.empty() ? g_backend_override.c_str()
+                                                             : std::getenv("GGML_BACKEND");
     if (force_backend) {
         bp.backend = ggml_backend_init_by_name(force_backend, nullptr);
         if (!bp.backend) {

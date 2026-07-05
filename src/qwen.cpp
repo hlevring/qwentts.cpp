@@ -187,6 +187,10 @@ void qt_log_set(qt_log_cb cb, void * user_data) {
     g_log_cb.store(cb, std::memory_order_release);
 }
 
+void qt_set_backend(const char * name) {
+    g_backend_override = name ? name : "";
+}
+
 void qt_init_default_params(struct qt_init_params * p) {
     p->abi_version = QT_ABI_VERSION;
     p->talker_path = nullptr;
