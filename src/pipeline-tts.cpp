@@ -676,6 +676,15 @@ qt_status pipeline_tts_synthesize(PipelineTTS *                pt,
             qt_log(QT_LOG_INFO, "[Pipeline] cancelled at step %d", step);
             return QT_STATUS_CANCELLED;
         }
+        // Progress (abi >= 3). Fraction vs max_new_tokens; early EOS may
+        // leave the bar below 1.0 until the caller treats completion as done.
+        if (params->abi_version >= 3 && params->on_progress && params->max_new_tokens > 0) {
+            float frac = (float) (step + 1) / (float) params->max_new_tokens;
+            if (frac > 1.0f) {
+                frac = 1.0f;
+            }
+            params->on_progress(frac, params->on_progress_user_data);
+        }
 
         TalkerForwardOutput fw;
         const char *        step_dump = (params->dump_dir && step == 0) ? params->dump_dir : NULL;

@@ -57,7 +57,7 @@ extern "C" {
 // git short hash + commit date string returned by qt_version(); for
 // binding compat checks, QT_ABI_VERSION is the only number that
 // matters.
-#define QT_ABI_VERSION 2
+#define QT_ABI_VERSION 3
 
 // Returns a static string of the form "<git-hash> (<date>)" identifying
 // the exact commit this binary was built from. Safe to call from any
@@ -204,6 +204,11 @@ typedef bool (*qt_cancel_cb)(void * user_data);
 // max_new flushes whatever frames remain.
 typedef bool (*qt_audio_chunk_cb)(const float * samples, int n_samples, void * user_data);
 
+// Cooperative progress callback. fraction is in [0, 1], monotonic non-
+// decreasing within a run. Polled alongside cancel at every Talker AR
+// step (~83 ms). NULL disables. Read when abi_version >= 3.
+typedef void (*qt_progress_cb)(float fraction, void * user_data);
+
 // Log severity. Numerically ordered so a callback can filter with a
 // simple `if (level < threshold) return;`. ERROR is reserved for
 // failure reports that the lib also surfaces via qt_status /
@@ -328,6 +333,10 @@ struct qt_tts_params {
     int             ref_spk_dim;
     const int32_t * ref_codes;
     int             ref_T;
+
+    // Progress. NULL disables. Read when abi_version >= 3.
+    qt_progress_cb on_progress;
+    void *         on_progress_user_data;
 };
 
 // Initialise to the standard defaults. Strings NULL, seed -1,

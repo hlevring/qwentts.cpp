@@ -230,6 +230,8 @@ void qt_tts_default_params(struct qt_tts_params * p) {
     p->ref_spk_dim            = 0;
     p->ref_codes              = nullptr;
     p->ref_T                  = 0;
+    p->on_progress            = nullptr;
+    p->on_progress_user_data  = nullptr;
 }
 
 int qt_num_codebooks(const struct qt_context * q) {
