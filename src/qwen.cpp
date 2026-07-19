@@ -267,7 +267,7 @@ struct qt_context * qt_init(const struct qt_init_params * params) {
     // GGUF reader, the codec load or the LM weight load throws via
     // qt_throw; the catch funnels every variant into one cleanup via
     // qt_free, which is idempotent on partial state (NULL-safe sched,
-    // NULL GGUF handles, refcount-correct backend release).
+    // NULL GGUF handles, NULL-safe backend_release).
     try {
         q->bp = backend_init("Talker");
         if (!q->bp.backend) {
